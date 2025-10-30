@@ -34,6 +34,7 @@ export default function Home() {
   const [usuario, setUsuario] = useState<Usuario | null>(null)
   const [carregandoUsuario, setCarregandoUsuario] = useState(true)
   const [mostrarAuthModal, setMostrarAuthModal] = useState(false)
+  const [modoAuthModal, setModoAuthModal] = useState<'login' | 'cadastro'>('login')
   const [mostrarMenuUsuario, setMostrarMenuUsuario] = useState(false)
   
   const conteudoDoDia = getConteudoDoDia()
@@ -79,6 +80,7 @@ export default function Home() {
 
   const handleFavoritar = async (tipo: 'versiculo' | 'reflexao' | 'santo' | 'oracao', conteudo: string, referencia?: string) => {
     if (!usuario) {
+      setModoAuthModal('login')
       setMostrarAuthModal(true)
       return
     }
@@ -124,6 +126,13 @@ export default function Home() {
     // Se não é premium, mostrar página de pagamento
     if (!usuarioEhPremium(novoUsuario)) {
       setPaginaAtual('pagamento')
+      
+      // Se é uma conta recém-criada (trial), redirecionar automaticamente para PagBank após 5 segundos
+      if (novoUsuario.status_pagamento === 'trial') {
+        setTimeout(() => {
+          window.open('https://pag.ae/81aj-zE2K', '_blank')
+        }, 5000)
+      }
     } else {
       setPaginaAtual('painel')
     }
@@ -136,6 +145,7 @@ export default function Home() {
 
   const verificarAcessoPremium = (acao: string) => {
     if (!usuario) {
+      setModoAuthModal('login')
       setMostrarAuthModal(true)
       return false
     }
@@ -146,6 +156,16 @@ export default function Home() {
     }
     
     return true
+  }
+
+  const abrirModalLogin = () => {
+    setModoAuthModal('login')
+    setMostrarAuthModal(true)
+  }
+
+  const abrirModalCadastro = () => {
+    setModoAuthModal('cadastro')
+    setMostrarAuthModal(true)
   }
 
   // Página de Pagamento
@@ -275,7 +295,7 @@ export default function Home() {
                 </div>
               ) : (
                 <button
-                  onClick={() => setMostrarAuthModal(true)}
+                  onClick={abrirModalLogin}
                   className="bg-sky-500 text-white px-4 py-2 rounded-xl hover:bg-sky-600 transition-colors flex items-center gap-2"
                 >
                   <User className="w-4 h-4" />
@@ -313,7 +333,7 @@ export default function Home() {
                 } else if (usuario && !ehPremium) {
                   setPaginaAtual('pagamento')
                 } else {
-                  setMostrarAuthModal(true)
+                  abrirModalLogin()
                 }
               }}
               className="bg-gradient-to-r from-sky-500 to-sky-600 text-white px-8 py-4 rounded-2xl font-semibold text-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300"
@@ -323,7 +343,7 @@ export default function Home() {
             
             {!usuario && (
               <button 
-                onClick={() => setMostrarAuthModal(true)}
+                onClick={abrirModalCadastro}
                 className="bg-white text-slate-700 px-8 py-4 rounded-2xl font-semibold text-lg shadow-lg hover:shadow-xl border border-sky-200 hover:border-sky-300 transform hover:scale-105 transition-all duration-300"
               >
                 👤 Criar Conta
@@ -377,6 +397,7 @@ export default function Home() {
           isOpen={mostrarAuthModal}
           onClose={() => setMostrarAuthModal(false)}
           onSuccess={handleAuthSuccess}
+          initialMode={modoAuthModal}
         />
       </div>
     )
@@ -495,7 +516,7 @@ export default function Home() {
               </div>
             ) : (
               <button
-                onClick={() => setMostrarAuthModal(true)}
+                onClick={abrirModalLogin}
                 className="bg-sky-500 text-white px-4 py-2 rounded-xl hover:bg-sky-600 transition-colors"
               >
                 Entrar
@@ -527,7 +548,7 @@ export default function Home() {
             Para acessar o conteúdo espiritual, você precisa fazer login ou criar uma conta.
           </p>
           <button
-            onClick={() => setMostrarAuthModal(true)}
+            onClick={abrirModalLogin}
             className="bg-gradient-to-r from-sky-500 to-sky-600 text-white px-8 py-4 rounded-2xl font-semibold text-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300"
           >
             Fazer Login / Criar Conta
@@ -825,6 +846,7 @@ export default function Home() {
         isOpen={mostrarAuthModal}
         onClose={() => setMostrarAuthModal(false)}
         onSuccess={handleAuthSuccess}
+        initialMode={modoAuthModal}
       />
     </div>
   )

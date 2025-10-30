@@ -1,23 +1,29 @@
 'use client'
 
-import { useState } from 'react'
-import { User, Lock, Mail, Eye, EyeOff, Crown } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { User, Lock, Mail, Eye, EyeOff, Crown, Clock } from 'lucide-react'
 import { criarConta, fazerLogin, registrarPagamento, type AuthResponse } from '@/lib/auth'
 
 interface AuthModalProps {
   isOpen: boolean
   onClose: () => void
   onSuccess: (usuario: any) => void
+  initialMode?: 'login' | 'cadastro'
 }
 
-export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
-  const [modo, setModo] = useState<'login' | 'cadastro'>('login')
+export default function AuthModal({ isOpen, onClose, onSuccess, initialMode = 'login' }: AuthModalProps) {
+  const [modo, setModo] = useState<'login' | 'cadastro'>(initialMode)
   const [email, setEmail] = useState('')
   const [senha, setSenha] = useState('')
   const [nome, setNome] = useState('')
   const [mostrarSenha, setMostrarSenha] = useState(false)
   const [carregando, setCarregando] = useState(false)
   const [mensagem, setMensagem] = useState('')
+
+  // Atualizar modo quando initialMode mudar
+  useEffect(() => {
+    setModo(initialMode)
+  }, [initialMode])
 
   if (!isOpen) return null
 
@@ -33,18 +39,15 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
         resultado = await criarConta(email, senha, nome)
         
         if (resultado.success && resultado.usuario) {
-          // Registrar pagamento pendente
+          // Registrar pagamento pendente para controle
           await registrarPagamento(resultado.usuario.id, 19.90)
           
-          // Redirecionar para pagamento
-          window.open('https://pag.ae/81aj-zE2K', '_blank')
-          
-          setMensagem('Conta criada! Redirecionando para pagamento...')
+          setMensagem('✅ Conta criada! Você tem 7 dias gratuitos de acesso Premium. Após esse período, será redirecionado para o pagamento.')
           
           setTimeout(() => {
             onSuccess(resultado.usuario)
             onClose()
-          }, 2000)
+          }, 3000)
         }
       } else {
         resultado = await fazerLogin(email, senha)
@@ -172,7 +175,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
           {/* Mensagem */}
           {mensagem && (
             <div className={`p-3 rounded-xl text-sm ${
-              mensagem.includes('sucesso') || mensagem.includes('criada')
+              mensagem.includes('sucesso') || mensagem.includes('criada') || mensagem.includes('✅')
                 ? 'bg-green-100 text-green-700'
                 : 'bg-red-100 text-red-700'
             }`}>
@@ -196,16 +199,33 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
             )}
           </button>
 
-          {/* Premium Info para Cadastro */}
+          {/* Trial Info para Cadastro */}
           {modo === 'cadastro' && (
+            <div className="bg-gradient-to-r from-green-50 to-emerald-100 p-4 rounded-xl border border-green-200">
+              <div className="flex items-center gap-2 mb-2">
+                <Clock className="w-5 h-5 text-green-600" />
+                <span className="font-semibold text-green-800">7 Dias Gratuitos!</span>
+              </div>
+              <p className="text-sm text-green-700 mb-2">
+                Ao criar sua conta, você terá <strong>7 dias de acesso Premium gratuito</strong> 
+                para experimentar todo o conteúdo espiritual.
+              </p>
+              <div className="flex items-center gap-2 text-xs text-green-600">
+                <Crown className="w-4 h-4" />
+                <span>Após o período, será cobrado R$ 19,90 para continuar</span>
+              </div>
+            </div>
+          )}
+
+          {/* Login Admin Info */}
+          {modo === 'login' && (
             <div className="bg-gradient-to-r from-amber-50 to-amber-100 p-4 rounded-xl border border-amber-200">
               <div className="flex items-center gap-2 mb-2">
                 <Crown className="w-5 h-5 text-amber-600" />
-                <span className="font-semibold text-amber-800">Acesso Premium</span>
+                <span className="font-semibold text-amber-800">Acesso Admin</span>
               </div>
               <p className="text-sm text-amber-700">
-                Após criar sua conta, você será redirecionado para o pagamento de R$ 19,90 
-                para ter acesso completo ao conteúdo espiritual.
+                Email: admin@admin.com | Senha: admin24
               </p>
             </div>
           )}

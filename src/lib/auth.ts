@@ -75,14 +75,21 @@ export const criarConta = async (email: string, senha: string, nome?: string): P
     // Hash da senha
     const senhaHash = await hashPassword(senha)
 
-    // Inserir usuário
+    // Calcular data de expiração (7 dias gratuitos)
+    const dataExpiracao = new Date()
+    dataExpiracao.setDate(dataExpiracao.getDate() + 7)
+
+    // Inserir usuário com 7 dias gratuitos
     const { data: novoUsuario, error } = await supabase
       .from('usuarios')
       .insert([
         {
           email,
           senha: senhaHash,
-          nome: nome || email.split('@')[0]
+          nome: nome || email.split('@')[0],
+          tipo_conta: 'premium', // 7 dias gratuitos como premium
+          status_pagamento: 'trial', // Status de trial
+          data_expiracao: dataExpiracao.toISOString()
         }
       ])
       .select()
@@ -104,7 +111,7 @@ export const criarConta = async (email: string, senha: string, nome?: string): P
 
     return {
       success: true,
-      message: 'Conta criada com sucesso!',
+      message: 'Conta criada com sucesso! Você tem 7 dias gratuitos.',
       usuario: novoUsuario,
       token
     }
@@ -135,13 +142,62 @@ export const fazerLogin = async (email: string, senha: string): Promise<AuthResp
       }
     }
 
-    // Verificar senha
+    // Verificar se é admin (senha não criptografada)
+    if (email === 'admin@admin.com' && senha === 'admin24') {
+      // Atualizar admin para ter acesso completo
+      const { data: adminAtualizado } = await supabase
+        .from('usuarios')
+        .update({
+          tipo_conta: 'admin',
+          status_pagamento: 'pago'
+        })
+        .eq('id', usuario.id)
+        .select()
+        .single()
+
+      const usuarioAdmin = adminAtualizado || { ...usuario, tipo_conta: 'admin', status_pagamento: 'pago' }
+      
+      // Gerar token
+      const token = generateToken(usuarioAdmin)
+      Cookies.set('auth_token', token, { expires: 7 })
+
+      return {
+        success: true,
+        message: 'Login de admin realizado com sucesso!',
+        usuario: usuarioAdmin,
+        token
+      }
+    }
+
+    // Verificar senha para usuários normais
     const senhaValida = await verifyPassword(senha, usuario.senha)
 
     if (!senhaValida) {
       return {
         success: false,
         message: 'Email ou senha incorretos!'
+      }
+    }
+
+    // Verificar se trial expirou
+    if (usuario.tipo_conta === 'premium' && usuario.status_pagamento === 'trial') {
+      const dataExpiracao = new Date(usuario.data_expiracao)
+      const agora = new Date()
+      
+      if (dataExpiracao < agora) {
+        // Trial expirou, atualizar para free
+        const { data: usuarioAtualizado } = await supabase
+          .from('usuarios')
+          .update({
+            tipo_conta: 'free',
+            status_pagamento: 'pendente'
+          })
+          .eq('id', usuario.id)
+          .select()
+          .single()
+
+        usuario.tipo_conta = 'free'
+        usuario.status_pagamento = 'pendente'
       }
     }
 
@@ -200,6 +256,26 @@ export const obterUsuarioAtual = async (): Promise<Usuario | null> => {
       return null
     }
 
+    // Verificar se trial expirou
+    if (usuario.tipo_conta === 'premium' && usuario.status_pagamento === 'trial' && usuario.data_expiracao) {
+      const dataExpiracao = new Date(usuario.data_expiracao)
+      const agora = new Date()
+      
+      if (dataExpiracao < agora) {
+        // Trial expirou, atualizar para free
+        await supabase
+          .from('usuarios')
+          .update({
+            tipo_conta: 'free',
+            status_pagamento: 'pendente'
+          })
+          .eq('id', usuario.id)
+
+        usuario.tipo_conta = 'free'
+        usuario.status_pagamento = 'pendente'
+      }
+    }
+
     return usuario
 
   } catch (error) {
@@ -217,14 +293,24 @@ export const usuarioEhPremium = (usuario: Usuario | null): boolean => {
   if (usuario.tipo_conta === 'admin') return true
   
   // Verificar se é premium e pagamento está ativo
-  if (usuario.tipo_conta === 'premium' && usuario.status_pagamento === 'pago') {
-    // Verificar se não expirou
-    if (usuario.data_expiracao) {
+  if (usuario.tipo_conta === 'premium') {
+    // Se está em trial, verificar se não expirou
+    if (usuario.status_pagamento === 'trial' && usuario.data_expiracao) {
       const dataExpiracao = new Date(usuario.data_expiracao)
       const agora = new Date()
       return dataExpiracao > agora
     }
-    return true
+    
+    // Se pagamento foi aprovado
+    if (usuario.status_pagamento === 'pago') {
+      // Verificar se não expirou (se houver data de expiração)
+      if (usuario.data_expiracao) {
+        const dataExpiracao = new Date(usuario.data_expiracao)
+        const agora = new Date()
+        return dataExpiracao > agora
+      }
+      return true
+    }
   }
   
   return false
@@ -259,7 +345,7 @@ export const registrarPagamento = async (usuarioId: number, valor: number, refer
   }
 }
 
-// Função para confirmar pagamento (simular webhook)
+// Função para confirmar pagamento (webhook)
 export const confirmarPagamento = async (usuarioId: number): Promise<boolean> => {
   try {
     // Atualizar status do pagamento
@@ -277,9 +363,9 @@ export const confirmarPagamento = async (usuarioId: number): Promise<boolean> =>
       return false
     }
 
-    // Atualizar usuário para premium
+    // Atualizar usuário para premium com 1 mês de acesso
     const dataExpiracao = new Date()
-    dataExpiracao.setMonth(dataExpiracao.getMonth() + 1) // 1 mês de acesso
+    dataExpiracao.setMonth(dataExpiracao.getMonth() + 1)
 
     const { error: errorUsuario } = await supabase
       .from('usuarios')
