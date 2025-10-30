@@ -6,27 +6,28 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
 // Tipos para o banco de dados
-export interface User {
-  id: string
-  nome: string
-  email: string
-  status_assinatura: 'ativo' | 'inativo'
-  created_at: string
-}
-
-export interface Conteudo {
-  id: string
-  tipo: 'reflexao' | 'oracao' | 'versiculo' | 'santo'
-  titulo: string
+export interface Versiculo {
+  id?: number
+  referencia: string
   texto: string
-  categoria?: string
-  data: string
-  premium: boolean
+  fonte: string
+  data_criacao?: string
+  user_id?: string
 }
 
-export interface Assinatura {
-  id: string
+export interface Favorito {
+  id?: number
   user_id: string
-  data_pagamento: string
-  status: 'ativo' | 'cancelado' | 'pendente'
+  tipo: 'versiculo' | 'reflexao' | 'santo' | 'oracao'
+  conteudo: string
+  referencia?: string
+  data_criacao?: string
+}
+
+export interface HistoricoUsuario {
+  id?: number
+  user_id: string
+  data_acesso: string
+  versiculo_id?: number
+  acao: string
 }
