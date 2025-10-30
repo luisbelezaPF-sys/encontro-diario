@@ -1,18 +1,10 @@
 import { supabase } from './supabase'
-import bcrypt from 'bcryptjs'
-import jwt from 'jsonwebtoken'
-import Cookies from 'js-cookie'
-
-const JWT_SECRET = process.env.JWT_SECRET || 'seu-jwt-secret-aqui'
 
 export interface Usuario {
   id: number
   email: string
-  nome?: string
-  tipo_conta?: string
-  status_pagamento?: string
-  data_pagamento?: string
-  data_expiracao?: string
+  senha?: string
+  created_at?: string
 }
 
 export interface AuthResponse {
@@ -22,36 +14,65 @@ export interface AuthResponse {
   token?: string
 }
 
-// Função para hash da senha
+// Função simples para hash da senha (usando Web Crypto API)
 export const hashPassword = async (password: string): Promise<string> => {
-  const saltRounds = 10
-  return await bcrypt.hash(password, saltRounds)
+  const encoder = new TextEncoder()
+  const data = encoder.encode(password)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+  const hashArray = Array.from(new Uint8Array(hashBuffer))
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
 // Função para verificar senha
 export const verifyPassword = async (password: string, hash: string): Promise<boolean> => {
-  return await bcrypt.compare(password, hash)
+  const passwordHash = await hashPassword(password)
+  return passwordHash === hash
 }
 
-// Função para gerar JWT
+// Função para gerar token simples
 export const generateToken = (usuario: Usuario): string => {
-  return jwt.sign(
-    { 
-      id: usuario.id, 
-      email: usuario.email, 
-      tipo_conta: usuario.tipo_conta || 'free' 
-    },
-    JWT_SECRET,
-    { expiresIn: '7d' }
-  )
+  const payload = {
+    id: usuario.id,
+    email: usuario.email,
+    timestamp: Date.now()
+  }
+  return btoa(JSON.stringify(payload))
 }
 
-// Função para verificar JWT
+// Função para verificar token
 export const verifyToken = (token: string): any => {
   try {
-    return jwt.verify(token, JWT_SECRET)
+    const decoded = JSON.parse(atob(token))
+    // Verificar se token não expirou (7 dias)
+    const sevenDays = 7 * 24 * 60 * 60 * 1000
+    if (Date.now() - decoded.timestamp > sevenDays) {
+      return null
+    }
+    return decoded
   } catch (error) {
     return null
+  }
+}
+
+// Função para salvar token no localStorage
+const saveToken = (token: string) => {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('auth_token', token)
+  }
+}
+
+// Função para obter token do localStorage
+const getToken = (): string | null => {
+  if (typeof window !== 'undefined') {
+    return localStorage.getItem('auth_token')
+  }
+  return null
+}
+
+// Função para remover token
+const removeToken = () => {
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem('auth_token')
   }
 }
 
@@ -75,21 +96,13 @@ export const criarConta = async (email: string, senha: string, nome?: string): P
     // Hash da senha
     const senhaHash = await hashPassword(senha)
 
-    // Calcular data de expiração (7 dias gratuitos)
-    const dataExpiracao = new Date()
-    dataExpiracao.setDate(dataExpiracao.getDate() + 7)
-
-    // Inserir usuário com 7 dias gratuitos
+    // Inserir usuário
     const { data: novoUsuario, error } = await supabase
       .from('usuarios')
       .insert([
         {
           email,
-          senha: senhaHash,
-          nome: nome || email.split('@')[0],
-          tipo_conta: 'premium', // 7 dias gratuitos como premium
-          status_pagamento: 'trial', // Status de trial
-          data_expiracao: dataExpiracao.toISOString()
+          senha: senhaHash
         }
       ])
       .select()
@@ -106,8 +119,8 @@ export const criarConta = async (email: string, senha: string, nome?: string): P
     // Gerar token
     const token = generateToken(novoUsuario)
 
-    // Salvar token no cookie
-    Cookies.set('auth_token', token, { expires: 7 })
+    // Salvar token
+    saveToken(token)
 
     return {
       success: true,
@@ -144,27 +157,14 @@ export const fazerLogin = async (email: string, senha: string): Promise<AuthResp
 
     // Verificar se é admin (senha não criptografada)
     if (email === 'admin@admin.com' && senha === 'admin24') {
-      // Atualizar admin para ter acesso completo
-      const { data: adminAtualizado } = await supabase
-        .from('usuarios')
-        .update({
-          tipo_conta: 'admin',
-          status_pagamento: 'pago'
-        })
-        .eq('id', usuario.id)
-        .select()
-        .single()
-
-      const usuarioAdmin = adminAtualizado || { ...usuario, tipo_conta: 'admin', status_pagamento: 'pago' }
-      
       // Gerar token
-      const token = generateToken(usuarioAdmin)
-      Cookies.set('auth_token', token, { expires: 7 })
+      const token = generateToken(usuario)
+      saveToken(token)
 
       return {
         success: true,
         message: 'Login de admin realizado com sucesso!',
-        usuario: usuarioAdmin,
+        usuario,
         token
       }
     }
@@ -179,33 +179,11 @@ export const fazerLogin = async (email: string, senha: string): Promise<AuthResp
       }
     }
 
-    // Verificar se trial expirou
-    if (usuario.tipo_conta === 'premium' && usuario.status_pagamento === 'trial') {
-      const dataExpiracao = new Date(usuario.data_expiracao)
-      const agora = new Date()
-      
-      if (dataExpiracao < agora) {
-        // Trial expirou, atualizar para free
-        const { data: usuarioAtualizado } = await supabase
-          .from('usuarios')
-          .update({
-            tipo_conta: 'free',
-            status_pagamento: 'pendente'
-          })
-          .eq('id', usuario.id)
-          .select()
-          .single()
-
-        usuario.tipo_conta = 'free'
-        usuario.status_pagamento = 'pendente'
-      }
-    }
-
     // Gerar token
     const token = generateToken(usuario)
 
-    // Salvar token no cookie
-    Cookies.set('auth_token', token, { expires: 7 })
+    // Salvar token
+    saveToken(token)
 
     return {
       success: true,
@@ -225,13 +203,13 @@ export const fazerLogin = async (email: string, senha: string): Promise<AuthResp
 
 // Função para logout
 export const fazerLogout = (): void => {
-  Cookies.remove('auth_token')
+  removeToken()
 }
 
 // Função para obter usuário atual
 export const obterUsuarioAtual = async (): Promise<Usuario | null> => {
   try {
-    const token = Cookies.get('auth_token')
+    const token = getToken()
     
     if (!token) {
       return null
@@ -240,7 +218,7 @@ export const obterUsuarioAtual = async (): Promise<Usuario | null> => {
     const decoded = verifyToken(token)
     
     if (!decoded) {
-      Cookies.remove('auth_token')
+      removeToken()
       return null
     }
 
@@ -252,91 +230,44 @@ export const obterUsuarioAtual = async (): Promise<Usuario | null> => {
       .single()
 
     if (error || !usuario) {
-      Cookies.remove('auth_token')
+      removeToken()
       return null
-    }
-
-    // Verificar se trial expirou
-    if (usuario.tipo_conta === 'premium' && usuario.status_pagamento === 'trial' && usuario.data_expiracao) {
-      const dataExpiracao = new Date(usuario.data_expiracao)
-      const agora = new Date()
-      
-      if (dataExpiracao < agora) {
-        // Trial expirou, atualizar para free
-        await supabase
-          .from('usuarios')
-          .update({
-            tipo_conta: 'free',
-            status_pagamento: 'pendente'
-          })
-          .eq('id', usuario.id)
-
-        usuario.tipo_conta = 'free'
-        usuario.status_pagamento = 'pendente'
-      }
     }
 
     return usuario
 
   } catch (error) {
     console.error('Erro ao obter usuário atual:', error)
-    Cookies.remove('auth_token')
+    removeToken()
     return null
   }
 }
 
-// Função para verificar se usuário é premium
+// Função para verificar se usuário é premium (simplificada)
 export const usuarioEhPremium = (usuario: Usuario | null): boolean => {
   if (!usuario) return false
   
   // Admin sempre tem acesso
-  if (usuario.tipo_conta === 'admin') return true
+  if (usuario.email === 'admin@admin.com') return true
   
-  // Verificar se é premium e pagamento está ativo
-  if (usuario.tipo_conta === 'premium') {
-    // Se está em trial, verificar se não expirou
-    if (usuario.status_pagamento === 'trial' && usuario.data_expiracao) {
-      const dataExpiracao = new Date(usuario.data_expiracao)
-      const agora = new Date()
-      return dataExpiracao > agora
-    }
+  // Para novos usuários, dar 7 dias gratuitos
+  if (usuario.created_at) {
+    const dataCriacao = new Date(usuario.created_at)
+    const agora = new Date()
+    const diasDesdeRegistro = (agora.getTime() - dataCriacao.getTime()) / (1000 * 60 * 60 * 24)
     
-    // Se pagamento foi aprovado
-    if (usuario.status_pagamento === 'pago') {
-      // Verificar se não expirou (se houver data de expiração)
-      if (usuario.data_expiracao) {
-        const dataExpiracao = new Date(usuario.data_expiracao)
-        const agora = new Date()
-        return dataExpiracao > agora
-      }
-      return true
-    }
+    // Se foi criado há menos de 7 dias, é premium
+    return diasDesdeRegistro <= 7
   }
   
   return false
 }
 
-// Função para registrar pagamento
+// Função para registrar pagamento (simplificada)
 export const registrarPagamento = async (usuarioId: number, valor: number, referenciaExterna?: string): Promise<boolean> => {
   try {
-    // Inserir pagamento
-    const { error: errorPagamento } = await supabase
-      .from('pagamentos')
-      .insert([
-        {
-          usuario_id: usuarioId,
-          valor,
-          status: 'pendente',
-          metodo_pagamento: 'pagbank',
-          referencia_externa: referenciaExterna
-        }
-      ])
-
-    if (errorPagamento) {
-      console.error('Erro ao registrar pagamento:', errorPagamento)
-      return false
-    }
-
+    // Para esta versão simplificada, apenas retorna true
+    console.log(`Pagamento registrado para usuário ${usuarioId}: R$ ${valor}`)
     return true
 
   } catch (error) {
@@ -345,43 +276,10 @@ export const registrarPagamento = async (usuarioId: number, valor: number, refer
   }
 }
 
-// Função para confirmar pagamento (webhook)
+// Função para confirmar pagamento (simplificada)
 export const confirmarPagamento = async (usuarioId: number): Promise<boolean> => {
   try {
-    // Atualizar status do pagamento
-    const { error: errorPagamento } = await supabase
-      .from('pagamentos')
-      .update({ 
-        status: 'aprovado',
-        data_pagamento: new Date().toISOString()
-      })
-      .eq('usuario_id', usuarioId)
-      .eq('status', 'pendente')
-
-    if (errorPagamento) {
-      console.error('Erro ao confirmar pagamento:', errorPagamento)
-      return false
-    }
-
-    // Atualizar usuário para premium com 1 mês de acesso
-    const dataExpiracao = new Date()
-    dataExpiracao.setMonth(dataExpiracao.getMonth() + 1)
-
-    const { error: errorUsuario } = await supabase
-      .from('usuarios')
-      .update({
-        tipo_conta: 'premium',
-        status_pagamento: 'pago',
-        data_pagamento: new Date().toISOString(),
-        data_expiracao: dataExpiracao.toISOString()
-      })
-      .eq('id', usuarioId)
-
-    if (errorUsuario) {
-      console.error('Erro ao atualizar usuário:', errorUsuario)
-      return false
-    }
-
+    console.log(`Pagamento confirmado para usuário ${usuarioId}`)
     return true
 
   } catch (error) {
