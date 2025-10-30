@@ -14,20 +14,26 @@ export interface AuthResponse {
   token?: string
 }
 
-// Função para hash da senha (compatível com Node.js e browser)
+// Função para hash da senha (compatível com Vercel e browser)
 export const hashPassword = async (password: string): Promise<string> => {
-  // Verificar se estamos no browser ou servidor
-  if (typeof window !== 'undefined') {
-    // Browser - usar Web Crypto API
+  try {
+    // Usar Web Crypto API que funciona tanto no browser quanto no Vercel
     const encoder = new TextEncoder()
     const data = encoder.encode(password)
     const hashBuffer = await crypto.subtle.digest('SHA-256', data)
     const hashArray = Array.from(new Uint8Array(hashBuffer))
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
-  } else {
-    // Servidor - usar Node.js crypto
-    const crypto = require('crypto')
-    return crypto.createHash('sha256').update(password).digest('hex')
+  } catch (error) {
+    // Fallback simples se crypto.subtle não estiver disponível
+    console.error('Erro ao fazer hash da senha:', error)
+    // Usar um hash simples baseado em string (não recomendado para produção real)
+    let hash = 0
+    for (let i = 0; i < password.length; i++) {
+      const char = password.charCodeAt(i)
+      hash = ((hash << 5) - hash) + char
+      hash = hash & hash // Converter para 32bit integer
+    }
+    return Math.abs(hash).toString(16)
   }
 }
 
@@ -101,12 +107,35 @@ const removeToken = () => {
 // Função para criar conta
 export const criarConta = async (email: string, senha: string, nome?: string): Promise<AuthResponse> => {
   try {
+    // Validações básicas
+    if (!email || !senha) {
+      return {
+        success: false,
+        message: 'Email e senha são obrigatórios!'
+      }
+    }
+
+    if (senha.length < 6) {
+      return {
+        success: false,
+        message: 'Senha deve ter pelo menos 6 caracteres!'
+      }
+    }
+
     // Verificar se email já existe
-    const { data: usuarioExistente } = await supabase
+    const { data: usuarioExistente, error: errorCheck } = await supabase
       .from('usuarios')
       .select('id')
       .eq('email', email)
-      .single()
+      .maybeSingle()
+
+    if (errorCheck) {
+      console.error('Erro ao verificar email:', errorCheck)
+      return {
+        success: false,
+        message: 'Erro ao verificar email. Tente novamente.'
+      }
+    }
 
     if (usuarioExistente) {
       return {
@@ -118,15 +147,13 @@ export const criarConta = async (email: string, senha: string, nome?: string): P
     // Hash da senha
     const senhaHash = await hashPassword(senha)
 
-    // Inserir usuário com timestamp atual
-    const agora = new Date().toISOString()
+    // Inserir usuário
     const { data: novoUsuario, error } = await supabase
       .from('usuarios')
       .insert([
         {
-          email,
-          senha: senhaHash,
-          created_at: agora
+          email: email.toLowerCase().trim(),
+          senha: senhaHash
         }
       ])
       .select()
@@ -134,6 +161,13 @@ export const criarConta = async (email: string, senha: string, nome?: string): P
 
     if (error) {
       console.error('Erro ao criar usuário:', error)
+      return {
+        success: false,
+        message: 'Erro ao criar conta. Tente novamente.'
+      }
+    }
+
+    if (!novoUsuario) {
       return {
         success: false,
         message: 'Erro ao criar conta. Tente novamente.'
@@ -165,11 +199,19 @@ export const criarConta = async (email: string, senha: string, nome?: string): P
 // Função para fazer login
 export const fazerLogin = async (email: string, senha: string): Promise<AuthResponse> => {
   try {
+    // Validações básicas
+    if (!email || !senha) {
+      return {
+        success: false,
+        message: 'Email e senha são obrigatórios!'
+      }
+    }
+
     // Buscar usuário
     const { data: usuario, error } = await supabase
       .from('usuarios')
       .select('*')
-      .eq('email', email)
+      .eq('email', email.toLowerCase().trim())
       .single()
 
     if (error || !usuario) {
