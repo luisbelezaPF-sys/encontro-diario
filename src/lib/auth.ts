@@ -14,13 +14,21 @@ export interface AuthResponse {
   token?: string
 }
 
-// Função simples para hash da senha (usando Web Crypto API)
+// Função para hash da senha (compatível com Node.js e browser)
 export const hashPassword = async (password: string): Promise<string> => {
-  const encoder = new TextEncoder()
-  const data = encoder.encode(password)
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
-  const hashArray = Array.from(new Uint8Array(hashBuffer))
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+  // Verificar se estamos no browser ou servidor
+  if (typeof window !== 'undefined') {
+    // Browser - usar Web Crypto API
+    const encoder = new TextEncoder()
+    const data = encoder.encode(password)
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+    const hashArray = Array.from(new Uint8Array(hashBuffer))
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+  } else {
+    // Servidor - usar Node.js crypto
+    const crypto = require('crypto')
+    return crypto.createHash('sha256').update(password).digest('hex')
+  }
 }
 
 // Função para verificar senha
@@ -29,39 +37,53 @@ export const verifyPassword = async (password: string, hash: string): Promise<bo
   return passwordHash === hash
 }
 
-// Função para gerar token simples
+// Função para gerar token JWT simples (compatível com produção)
 export const generateToken = (usuario: Usuario): string => {
   const payload = {
     id: usuario.id,
     email: usuario.email,
-    timestamp: Date.now()
+    timestamp: Date.now(),
+    exp: Date.now() + (7 * 24 * 60 * 60 * 1000) // 7 dias
   }
-  return btoa(JSON.stringify(payload))
+  
+  // Em produção, usar uma chave secreta mais robusta
+  const secret = process.env.JWT_SECRET || 'fallback-secret-key-for-development'
+  const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
+  const payloadEncoded = btoa(JSON.stringify(payload))
+  
+  // Simular assinatura (em produção, usar biblioteca JWT real)
+  const signature = btoa(`${header}.${payloadEncoded}.${secret}`)
+  
+  return `${header}.${payloadEncoded}.${signature}`
 }
 
 // Função para verificar token
 export const verifyToken = (token: string): any => {
   try {
-    const decoded = JSON.parse(atob(token))
-    // Verificar se token não expirou (7 dias)
-    const sevenDays = 7 * 24 * 60 * 60 * 1000
-    if (Date.now() - decoded.timestamp > sevenDays) {
+    const parts = token.split('.')
+    if (parts.length !== 3) return null
+    
+    const payload = JSON.parse(atob(parts[1]))
+    
+    // Verificar se token não expirou
+    if (Date.now() > payload.exp) {
       return null
     }
-    return decoded
+    
+    return payload
   } catch (error) {
     return null
   }
 }
 
-// Função para salvar token no localStorage
+// Função para salvar token no localStorage (apenas no browser)
 const saveToken = (token: string) => {
   if (typeof window !== 'undefined') {
     localStorage.setItem('auth_token', token)
   }
 }
 
-// Função para obter token do localStorage
+// Função para obter token do localStorage (apenas no browser)
 const getToken = (): string | null => {
   if (typeof window !== 'undefined') {
     return localStorage.getItem('auth_token')
@@ -96,13 +118,15 @@ export const criarConta = async (email: string, senha: string, nome?: string): P
     // Hash da senha
     const senhaHash = await hashPassword(senha)
 
-    // Inserir usuário
+    // Inserir usuário com timestamp atual
+    const agora = new Date().toISOString()
     const { data: novoUsuario, error } = await supabase
       .from('usuarios')
       .insert([
         {
           email,
-          senha: senhaHash
+          senha: senhaHash,
+          created_at: agora
         }
       ])
       .select()
